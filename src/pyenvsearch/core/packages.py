@@ -140,6 +140,10 @@ class PackageFinder:
 
     def find_package(self, package_name: str) -> PackageInfo:
         """Find information about a specific package."""
+        # Handle edge cases
+        if not package_name or not package_name.strip():
+            return PackageInfo(name=package_name, location=None)
+
         # If we have a detected virtual environment, use its Python to find packages
         if (
             self.venv_info.path
@@ -499,8 +503,14 @@ class PackageFinder:
 
         return None
 
-    def generate_toc(self, package_name: str, depth: int = 2) -> TableOfContents:
+    def generate_toc(
+        self, package_name: str, depth: int = 2, public_only: bool = False
+    ) -> TableOfContents:
         """Generate a table of contents for a package."""
+        # Handle edge cases
+        if not package_name or not package_name.strip():
+            return TableOfContents(package_name=package_name)
+
         toc = TableOfContents(package_name=package_name)
 
         # First find the package location
@@ -509,7 +519,7 @@ class PackageFinder:
         if package_info.location and package_info.location.exists():
             # Use filesystem-based analysis
             toc.structure = self._build_package_structure_from_filesystem(
-                package_info.location, depth
+                package_info.location, depth, public_only=public_only
             )
             # Count totals
             self._count_items(toc.structure, toc)
@@ -518,7 +528,9 @@ class PackageFinder:
             try:
                 package = importlib.import_module(package_name)
                 if hasattr(package, "__path__"):
-                    toc.structure = self._build_package_structure(package_name, depth)
+                    toc.structure = self._build_package_structure(
+                        package_name, depth, public_only=public_only
+                    )
                     # Count totals
                     self._count_items(toc.structure, toc)
             except ImportError:
@@ -528,7 +540,7 @@ class PackageFinder:
         return toc
 
     def _build_package_structure_from_filesystem(
-        self, package_path: Path, max_depth: int, current_depth: int = 0
+        self, package_path: Path, max_depth: int, current_depth: int = 0, public_only: bool = False
     ) -> dict[str, Any]:
         """Build package structure by analyzing filesystem directly."""
         if current_depth >= max_depth or not package_path.is_dir():
@@ -538,22 +550,35 @@ class PackageFinder:
 
         try:
             for item in package_path.iterdir():
-                # Skip private items and non-Python files
-                if item.name.startswith("_") and item.name not in ["__init__.py", "__main__.py"]:
+                # Skip system/cache directories but include all Python modules
+                if item.name in ["__pycache__", ".pytest_cache"] or item.name.startswith("."):
+                    continue
+
+                # Filter private items if public_only is True
+                if (
+                    public_only
+                    and item.name.startswith("_")
+                    and item.name not in ["__init__.py", "__main__.py"]
+                ):
                     continue
 
                 if item.is_file() and item.suffix == ".py" and item.name != "__init__.py":
                     # It's a Python module - analyze it
                     module_name = item.stem
-                    structure[module_name] = self._analyze_python_file(item)
+                    structure[module_name] = self._analyze_python_file(
+                        item, public_only=public_only
+                    )
 
                 elif item.is_dir():
                     # Check if it's a Python package (has __init__.py or is namespace)
                     init_file = item / "__init__.py"
                     if init_file.exists() or any(item.glob("*.py")):
+                        # Filter private packages if public_only is True
+                        if public_only and item.name.startswith("_"):
+                            continue
                         # It's a subpackage - recurse
                         substructure = self._build_package_structure_from_filesystem(
-                            item, max_depth, current_depth + 1
+                            item, max_depth, current_depth + 1, public_only=public_only
                         )
                         if substructure:  # Only add if it has content
                             structure[item.name] = substructure
@@ -566,7 +591,7 @@ class PackageFinder:
 
         return structure
 
-    def _analyze_python_file(self, file_path: Path) -> dict[str, Any]:
+    def _analyze_python_file(self, file_path: Path, public_only: bool = False) -> dict[str, Any]:
         """Analyze a Python file to extract classes and functions without importing."""
         items = {"type": "module"}
 
@@ -586,12 +611,12 @@ class PackageFinder:
 
             # Add classes
             for class_name in classes:
-                if not class_name.startswith("_"):
+                if not public_only or not class_name.startswith("_"):
                     items[class_name] = {"type": "class"}
 
             # Add functions
             for func_name in functions:
-                if not func_name.startswith("_"):
+                if not public_only or not func_name.startswith("_"):
                     items[func_name] = {"type": "function"}
 
         except (OSError, UnicodeDecodeError):
@@ -600,7 +625,7 @@ class PackageFinder:
         return items
 
     def _build_package_structure(
-        self, package_name: str, max_depth: int, current_depth: int = 0
+        self, package_name: str, max_depth: int, current_depth: int = 0, public_only: bool = False
     ) -> dict[str, Any]:
         """Build the structure dictionary for a package."""
         if current_depth >= max_depth:
@@ -619,16 +644,22 @@ class PackageFinder:
                     # Get the simple name (without package prefix)
                     simple_name = modname.split(".")[-1]
 
+                    # Filter private modules if public_only is True
+                    if public_only and simple_name.startswith("_"):
+                        continue
+
                     if ispkg:
                         # Recursively build structure for subpackages
                         structure[simple_name] = self._build_package_structure(
-                            modname, max_depth, current_depth + 1
+                            modname, max_depth, current_depth + 1, public_only=public_only
                         )
                     else:
                         # This is a module, try to analyze it
                         try:
                             module = importlib.import_module(modname)
-                            structure[simple_name] = self._analyze_module(module)
+                            structure[simple_name] = self._analyze_module(
+                                module, public_only=public_only
+                            )
                         except Exception:
                             structure[simple_name] = {"type": "module"}
         except ImportError:
@@ -636,13 +667,13 @@ class PackageFinder:
 
         return structure
 
-    def _analyze_module(self, module) -> dict[str, Any]:
+    def _analyze_module(self, module, public_only: bool = False) -> dict[str, Any]:
         """Analyze a module to extract classes and functions."""
         items = {}
 
-        # Get all public attributes
+        # Get all attributes (filter private ones if public_only is True)
         for name in dir(module):
-            if name.startswith("_"):
+            if public_only and name.startswith("_"):
                 continue
 
             try:

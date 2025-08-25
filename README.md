@@ -104,8 +104,9 @@ pyenvsearch docs requests
 **Navigate and search through package code**
 
 ```bash
-# Generate package table of contents  
+# Generate package table of contents (includes private modules)
 pyenvsearch toc fastapi --depth 3
+pyenvsearch toc httpx --public  # Only show public API
 
 # Search for code patterns
 pyenvsearch search "class.*Http" --type regex
@@ -120,6 +121,41 @@ pyenvsearch list-classes requests
 pyenvsearch list-methods httpx --include-private
 pyenvsearch list-enums enum --enum-type IntEnum
 ```
+
+### 🔬 Enhanced Object Inspection
+**Powerful replacement for Python's built-in `dir()` with rich information**
+
+```bash
+# Import and use the enhanced dir() function
+uv run python -c "
+from pyenvsearch import enhanced_dir
+import requests
+enhanced_dir(requests, max_items=10)
+"
+
+# Explore any Python object with rich details
+uv run python -c "
+from pyenvsearch import enhanced_dir
+from pathlib import Path
+enhanced_dir(Path('/tmp'), show_private=False, max_items=15)
+"
+
+# Perfect for exploring unfamiliar APIs
+uv run python -c "
+from pyenvsearch import enhanced_dir
+import httpx
+enhanced_dir(httpx.AsyncClient, max_items=20)
+"
+```
+
+**What you get:**
+- 🏷️ **Rich type information** (class, method, function, property, etc.)
+- 📝 **Docstring snippets** automatically extracted and cleaned  
+- ✍️ **Function signatures** with full parameter lists
+- 👀 **Value previews** for constants and simple objects
+- 📁 **Organized output** grouped by attribute type  
+- 🔒 **Public/private indicators** with clear visual cues
+- 📊 **Summary statistics** showing total counts
 
 ### 🤖 AI-Powered Analysis
 **Get intelligent insights about any Python package**
@@ -173,6 +209,27 @@ pyenvsearch class BaseModel --package pydantic
 # Need usage examples:
 pyenvsearch howto pydantic --task "custom validators"
 pyenvsearch api-guide pydantic
+```
+
+### 🔬 Object Inspection & API Exploration
+```bash
+# Quickly understand an unfamiliar object
+uv run python -c "
+from pyenvsearch import enhanced_dir
+import httpx
+enhanced_dir(httpx.AsyncClient, max_items=15, show_private=False)
+"
+
+# Compare public vs private API surface  
+uv run python -c "
+from pyenvsearch import enhanced_dir
+from pathlib import Path
+p = Path('.')
+print('=== Public API ===')
+enhanced_dir(p, show_private=False, max_items=10)
+print('\n=== Private Methods ===') 
+enhanced_dir(p, show_private=True, max_items=20)
+"
 ```
 
 ### 🤖 AI Agent Workflows

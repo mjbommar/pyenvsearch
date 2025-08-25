@@ -26,6 +26,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 🔎 Code Navigation & Search:
   pyenvsearch toc fastapi             # Generate package table of contents
+  pyenvsearch toc httpx --public      # Only show public API (no underscore)
   pyenvsearch search "class.*Http"    # Search for HTTP-related classes
   pyenvsearch class HttpClient        # Find specific class definitions
   pyenvsearch method get              # Find method implementations
@@ -41,6 +42,10 @@ def create_parser() -> argparse.ArgumentParser:
   pyenvsearch ask requests "How do I handle timeouts?"  # Ask specific questions
   pyenvsearch llm-tools               # List available AI tools
 
+🔬 Enhanced Object Inspection:
+  uv run python -c "from pyenvsearch import enhanced_dir; enhanced_dir(obj)"
+  # Rich dir() replacement with types, signatures, docstrings & more
+
 💡 Pro Tips:
   • Add --json to any command for structured output
   • Use --tool claude|gemini|codex|goose to choose AI tool
@@ -49,7 +54,7 @@ def create_parser() -> argparse.ArgumentParser:
         """,
     )
 
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.5.0")
 
     # Create subparsers for different commands
     subparsers = parser.add_subparsers(dest="command", help="Available commands", metavar="COMMAND")
@@ -109,6 +114,9 @@ def create_parser() -> argparse.ArgumentParser:
     toc_parser.add_argument("package", help="Package name to generate TOC for")
     toc_parser.add_argument(
         "--depth", type=int, default=2, help="Maximum depth for TOC (default: 2)"
+    )
+    toc_parser.add_argument(
+        "--public", action="store_true", help="Only show public items (no underscore prefix)"
     )
     toc_parser.add_argument("--json", action="store_true", help="Output in JSON format")
 
@@ -333,7 +341,9 @@ def main() -> int:
 
         elif args.command == "toc":
             finder = PackageFinder()
-            result = finder.generate_toc(args.package, depth=args.depth)
+            result = finder.generate_toc(
+                args.package, depth=args.depth, public_only=getattr(args, "public", False)
+            )
             if args.json:
                 import json
 
