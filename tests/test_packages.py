@@ -4,9 +4,9 @@ Tests package finding, table of contents generation, and site-packages navigatio
 Uses real packages from the virtual environment.
 """
 
-import pytest
 from pathlib import Path
-import sys
+
+import pytest
 
 from pyenvsearch.core.packages import PackageFinder, PackageInfo, TableOfContents
 
@@ -48,7 +48,7 @@ class TestPackageDiscovery:
         if result.found:
             # Standard library modules might not have __version__
             # but the method should not crash
-            assert isinstance(result.version, (str, type(None)))
+            assert isinstance(result.version, str | type(None))
 
     def test_find_installed_package(self, finder):
         """Test finding an installed third-party package."""
@@ -241,7 +241,7 @@ class TestSitePackagesNavigation:
         result = finder.find_package("json")
 
         # Should not crash, version can be None for built-ins
-        assert isinstance(result.version, (str, type(None)))
+        assert isinstance(result.version, str | type(None))
 
 
 class TestPackageLocationFeatures:

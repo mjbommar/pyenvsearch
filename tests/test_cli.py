@@ -4,11 +4,11 @@ Tests all CLI commands with real packages and options.
 Uses subprocess to test actual command-line usage.
 """
 
-import pytest
-import subprocess
 import json
+import subprocess
 import sys
-from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -334,8 +334,9 @@ class TestCLIErrorHandling:
         """Test that CLI handles KeyboardInterrupt gracefully."""
         # This is hard to test automatically, but we can check that
         # the code structure exists for handling it
-        import pyenvsearch.main
         import inspect
+
+        import pyenvsearch.main
 
         # Check that main() handles KeyboardInterrupt
         source = inspect.getsource(pyenvsearch.main.main)

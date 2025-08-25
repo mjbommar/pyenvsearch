@@ -1,6 +1,5 @@
 """Tests for virtual environment detection."""
 
-import pytest
 from pathlib import Path
 
 from pyenvsearch.core.venv import VirtualEnvDetector, VirtualEnvInfo

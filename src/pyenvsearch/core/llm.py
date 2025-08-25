@@ -7,6 +7,7 @@ Supports claude, gemini, codex, and goose with automatic fallback.
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .packages import PackageFinder
@@ -292,77 +293,70 @@ Focus on being practical and actionable. If the question can't be answered about
 
     def _enhance_prompt_with_context(self, base_prompt: str, package_info) -> str:
         """Enhance prompt with package location and actual source code context."""
+        MAX_CONTEXT_SIZE = 15000  # ~15KB total context to stay under LLM limits
+        MAX_FILES = 3
+        MAX_FILE_SIZE = 4000  # Per file limit
+
         context_lines = [base_prompt, ""]
+        current_size = len(base_prompt)
 
         if package_info.location and package_info.location.exists():
-            context_lines.append(f"Package location: {package_info.location}")
+            location_info = f"Package location: {package_info.location}"
+            context_lines.append(location_info)
+            current_size += len(location_info)
 
             # Add actual file contents for better context
             if package_info.location.is_file() and package_info.location.suffix == ".py":
-                try:
-                    size = package_info.location.stat().st_size
-                    if size < 50000:  # Less than 50KB
-                        content = package_info.location.read_text(encoding="utf-8", errors="ignore")
-                        context_lines.append("Package source code:")
-                        context_lines.append("```python")
-                        context_lines.append(content[:5000])  # First 5KB of content
-                        context_lines.append("```")
-                except (OSError, UnicodeDecodeError):
+                file_context = self._read_file_safely(package_info.location, MAX_FILE_SIZE)
+                if file_context and current_size + len(file_context) < MAX_CONTEXT_SIZE:
+                    context_lines.append("Package source code:")
+                    context_lines.append("```python")
+                    context_lines.append(file_context)
+                    context_lines.append("```")
+                    current_size += len(file_context)
+                else:
                     context_lines.append(
                         f"Package source file available at: {package_info.location}"
                     )
+
             elif package_info.location.is_dir():
-                # Read key files for context
-                context_lines.append("Package structure and key source code:")
+                # Read key files for context with size management
+                structure_header = "Package structure and key source code:"
+                context_lines.append(structure_header)
+                current_size += len(structure_header)
 
                 try:
-                    # List main Python files
-                    py_files = sorted(
-                        [
-                            f
-                            for f in package_info.location.glob("*.py")
-                            if not f.name.startswith("_")
-                        ]
-                    )[:3]
-                    init_file = package_info.location / "__init__.py"
+                    # Prioritize files by importance
+                    important_files = self._get_important_files(package_info.location)
+                    files_added = 0
 
-                    # Always try to read __init__.py first
-                    if init_file.exists():
-                        try:
-                            content = init_file.read_text(encoding="utf-8", errors="ignore")
-                            if content.strip():
-                                context_lines.append(f"\\n--- {init_file.name} ---")
-                                context_lines.append("```python")
-                                context_lines.append(content[:3000])  # First 3KB
-                                context_lines.append("```")
-                        except (OSError, UnicodeDecodeError):
-                            pass
-
-                    # Read a few other key files
-                    files_read = 1 if init_file.exists() else 0
-                    for py_file in py_files:
-                        if files_read >= 2:  # Limit to prevent prompt bloat
+                    for file_path in important_files[:MAX_FILES]:
+                        if current_size >= MAX_CONTEXT_SIZE or files_added >= MAX_FILES:
                             break
-                        if py_file.name != "__init__.py":
-                            try:
-                                content = py_file.read_text(encoding="utf-8", errors="ignore")
-                                if (
-                                    content.strip() and len(content) < 10000
-                                ):  # Skip very large files
-                                    context_lines.append(f"\\n--- {py_file.name} ---")
-                                    context_lines.append("```python")
-                                    context_lines.append(content[:2000])  # First 2KB
-                                    context_lines.append("```")
-                                    files_read += 1
-                            except (OSError, UnicodeDecodeError):
-                                continue
 
-                    # Also list directory structure
-                    py_files_all = list(package_info.location.glob("*.py"))[:10]
-                    if py_files_all:
-                        context_lines.append("\\nAvailable Python modules:")
-                        for py_file in py_files_all:
-                            context_lines.append(f"  - {py_file.name}")
+                        file_content = self._read_file_safely(file_path, MAX_FILE_SIZE)
+                        if file_content:
+                            file_section = (
+                                f"\\n--- {file_path.name} ---\\n```python\\n{file_content}\\n```"
+                            )
+                            if current_size + len(file_section) < MAX_CONTEXT_SIZE:
+                                context_lines.append(file_section)
+                                current_size += len(file_section)
+                                files_added += 1
+                            else:
+                                # Add truncated version or skip
+                                break
+
+                    # Add directory listing if space allows
+                    if current_size < MAX_CONTEXT_SIZE - 500:  # Leave room for listing
+                        py_files = list(package_info.location.glob("*.py"))[:10]
+                        if py_files:
+                            listing = "\\nAvailable Python modules:\\n"
+                            for py_file in py_files:
+                                listing += f"  - {py_file.name}\\n"
+
+                            if current_size + len(listing) < MAX_CONTEXT_SIZE:
+                                context_lines.append(listing.rstrip())
 
                 except (OSError, AttributeError):
                     context_lines.append("Unable to read package structure")
@@ -370,13 +364,73 @@ Focus on being practical and actionable. If the question can't be answered about
             context_lines.append(f"Package '{package_info.name}' not found in current environment.")
 
         if package_info.version:
-            context_lines.append(f"\\nPackage version: {package_info.version}")
+            version_info = f"\\nPackage version: {package_info.version}"
+            if current_size + len(version_info) < MAX_CONTEXT_SIZE:
+                context_lines.append(version_info)
 
-        context_lines.append(
-            "\\nPlease base your answer on the actual source code provided above, not general knowledge."
-        )
+        # Only add this instruction if we have space
+        instruction = "\\nPlease base your answer on the actual source code provided above, not general knowledge."
+        if current_size + len(instruction) < MAX_CONTEXT_SIZE:
+            context_lines.append(instruction)
+
         context_lines.append("")
         return "\\n".join(context_lines)
+
+    def _read_file_safely(self, file_path: Path, max_size: int) -> str | None:
+        """Safely read a file with size limits and encoding handling."""
+        try:
+            # Check file size first
+            if file_path.stat().st_size > max_size * 2:  # Skip very large files
+                return (
+                    f"[File too large: {file_path.stat().st_size} bytes - showing first {max_size} chars]\\n"
+                    + file_path.read_text(encoding="utf-8", errors="replace")[:max_size]
+                )
+
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+
+            # Truncate if needed
+            if len(content) > max_size:
+                content = content[:max_size] + "\\n... [truncated]"
+
+            return content
+
+        except (OSError, UnicodeDecodeError, PermissionError):
+            return None
+
+    def _get_important_files(self, package_dir: Path) -> list[Path]:
+        """Get list of important files in order of priority."""
+        important_files = []
+
+        # Always prioritize __init__.py
+        init_file = package_dir / "__init__.py"
+        if init_file.exists():
+            important_files.append(init_file)
+
+        # Then main.py, __main__.py if they exist
+        for main_name in ["main.py", "__main__.py", "core.py", "api.py"]:
+            main_file = package_dir / main_name
+            if main_file.exists() and main_file not in important_files:
+                important_files.append(main_file)
+
+        # Then other non-private Python files, sorted by size (smaller first for better context)
+        other_files = []
+        for py_file in package_dir.glob("*.py"):
+            if (
+                not py_file.name.startswith("_")
+                and py_file not in important_files
+                and py_file.name not in ["setup.py", "conftest.py"]
+            ):
+                try:
+                    size = py_file.stat().st_size
+                    other_files.append((size, py_file))
+                except OSError:
+                    continue
+
+        # Sort by size (smallest first) and add to important files
+        other_files.sort()
+        important_files.extend([file for _, file in other_files])
+
+        return important_files
 
     def _execute_llm_analysis(self, tool: LLMTool, prompt: str, package_info) -> str:
         """Execute LLM analysis with the specified tool."""

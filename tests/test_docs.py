@@ -3,10 +3,11 @@
 Tests with real packages only - no mocking.
 """
 
-import pytest
 from pathlib import Path
 
-from pyenvsearch.core.docs import DocumentationSearcher, DocumentationResult, DocumentationFile
+import pytest
+
+from pyenvsearch.core.docs import DocumentationFile, DocumentationResult, DocumentationSearcher
 
 
 @pytest.fixture
@@ -189,9 +190,9 @@ class TestDocumentationSearchConstants:
         assert hasattr(searcher, "DOC_DIR_NAMES")
 
         # Should be lists or similar containers
-        assert isinstance(searcher.LLM_DOC_FILES, (list, tuple))
-        assert isinstance(searcher.README_PATTERNS, (list, tuple))
-        assert isinstance(searcher.DOC_DIR_NAMES, (list, tuple))
+        assert isinstance(searcher.LLM_DOC_FILES, list | tuple)
+        assert isinstance(searcher.README_PATTERNS, list | tuple)
+        assert isinstance(searcher.DOC_DIR_NAMES, list | tuple)
 
         # Should have expected values
         assert "llms.txt" in searcher.LLM_DOC_FILES or "ai.txt" in searcher.LLM_DOC_FILES

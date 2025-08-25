@@ -4,12 +4,11 @@ Tests the core search capabilities including ast-grep and ripgrep integration.
 Uses real packages from the virtual environment - no mocking.
 """
 
-import pytest
-import shutil
-from pathlib import Path
 from unittest.mock import patch
 
-from pyenvsearch.core.search import CodeSearcher, SearchResult, ListResult
+import pytest
+
+from pyenvsearch.core.search import CodeSearcher, ListResult, SearchResult
 
 
 @pytest.fixture
@@ -29,7 +28,7 @@ def sample_python_files(tmp_path):
 class TestClass:
     def method1(self):
         return "test"
-    
+
     def _private_method(self):
         return "private"
 
